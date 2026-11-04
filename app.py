@@ -11,16 +11,18 @@ web_image = (
     modal.Image.debian_slim(python_version="3.11")
     .uv_pip_install("fastapi>=0.115.0")
     .add_local_file(str(Path(__file__).with_name("index.html")), "/root/index.html")
+    .add_local_file(str(Path(__file__).with_name("logo.png")), "/root/logo.png")
+    .add_local_file(str(Path(__file__).with_name("favicon.png")), "/root/favicon.png")
     .add_local_python_source("serve")
 )
 
 
-@app.function(image=web_image)
+@app.function(image=web_image, min_containers=1)
 @modal.asgi_app()
 def web():
     from fastapi import FastAPI, Request
     from fastapi.middleware.cors import CORSMiddleware
-    from fastapi.responses import HTMLResponse, JSONResponse, Response, StreamingResponse
+    from fastapi.responses import FileResponse, HTMLResponse, JSONResponse, StreamingResponse
 
     web_app = FastAPI(title="rekt.eth")
     web_app.add_middleware(
@@ -34,13 +36,21 @@ def web():
     def index():
         return HTMLResponse(Path("/root/index.html").read_text(encoding="utf-8"))
 
+    @web_app.get("/logo.png", include_in_schema=False)
+    def logo():
+        return FileResponse("/root/logo.png", media_type="image/png")
+
+    @web_app.get("/favicon.png", include_in_schema=False)
+    def favicon_png():
+        return FileResponse("/root/favicon.png", media_type="image/png")
+
     @web_app.get("/health")
     def health():
         return {"status": "ok", **Chat().health.remote()}
 
-    @web_app.get("/favicon.ico")
+    @web_app.get("/favicon.ico", include_in_schema=False)
     def favicon():
-        return Response(status_code=204)
+        return FileResponse("/root/favicon.png", media_type="image/png")
 
     @web_app.post("/chat")
     async def chat(request: Request):

@@ -6,18 +6,12 @@ import modal
 MODEL_ID = "Qwen/Qwen3.5-4B"
 VOLUME_NAME = "doomer-qwen"
 STEERING_PATH = "/vol/steering.pt"
+STEERING_FORMAT_VERSION = 2
 HF_CACHE_PATH = "/vol/hf"
 REFERENCE_PROMPT = "who are you?"
 MAX_NEW_TOKENS = 192
 REPETITION_PENALTY = 1.12
-TEMPERATURE = 0.7
-TOP_P = 0.9
-TOP_K = 40
 SEED = 42
-SYSTEM_PROMPT = (
-    "You are a helpful assistant. Follow the latest user request exactly and "
-    "recall earlier details verbatim when asked."
-)
 
 volume = modal.Volume.from_name(VOLUME_NAME, create_if_missing=True)
 model_image = (
@@ -41,27 +35,18 @@ model_image = (
 app = modal.App("doomer-qwen-chat")
 
 
-class ConversationRepetitionPenalty:
-    def __init__(self, penalty, prompt_length, system_token_ids):
-        import torch
+class GeneratedRepetitionPenalty:
+    def __init__(self, penalty, prompt_length):
         from transformers import RepetitionPenaltyLogitsProcessor
 
         self.prompt_length = prompt_length
-        self.system_token_ids = torch.tensor(system_token_ids, dtype=torch.long)
         self.processor = RepetitionPenaltyLogitsProcessor(penalty)
 
     def __call__(self, input_ids, scores):
-        import torch
-
         generated_ids = input_ids[:, self.prompt_length :]
-        system_ids = self.system_token_ids.to(input_ids.device).unsqueeze(0)
-        system_ids = system_ids.expand(input_ids.shape[0], -1)
-        penalized_ids = generated_ids
-        if system_ids.shape[1]:
-            penalized_ids = torch.cat((system_ids, generated_ids), dim=1)
-        if penalized_ids.shape[1] == 0:
+        if generated_ids.shape[1] == 0:
             return scores
-        return self.processor(penalized_ids, scores)
+        return self.processor(generated_ids, scores)
 
 
 def decoder_layers(model):
@@ -115,34 +100,28 @@ def prepare_messages(messages):
         prepared.append({"role": role, "content": content})
     if not any(message["role"] == "user" for message in prepared):
         raise ValueError("at least one user message is required")
-    return [{"role": "system", "content": SYSTEM_PROMPT}, *prepared]
+    return prepared
 
 
-def generation_settings(tokenizer, max_new_tokens=MAX_NEW_TOKENS, sample=True, prompt_length=None):
-    from transformers import LogitsProcessorList
+def generation_settings(tokenizer, max_new_tokens=MAX_NEW_TOKENS, prompt_length=None):
+    from transformers import LogitsProcessorList, SuppressTokensLogitsProcessor
 
     eos_ids = {tokenizer.eos_token_id, tokenizer.convert_tokens_to_ids("<|im_end|>")}
     eos_ids = sorted(token_id for token_id in eos_ids if token_id is not None)
     settings = {
         "max_new_tokens": max_new_tokens,
-        "do_sample": sample,
-        "repetition_penalty": 1.0,
+        "do_sample": False,
         "eos_token_id": eos_ids,
         "pad_token_id": tokenizer.pad_token_id or eos_ids[0],
         "use_cache": True,
     }
-    if sample:
-        settings.update({"temperature": TEMPERATURE, "top_p": TOP_P, "top_k": TOP_K})
+    think_token_ids = [
+        tokenizer.convert_tokens_to_ids(token) for token in ("<think>", "</think>")
+    ]
+    processors = [SuppressTokensLogitsProcessor(think_token_ids)]
     if prompt_length is not None:
-        settings["logits_processor"] = LogitsProcessorList(
-            [
-                ConversationRepetitionPenalty(
-                    REPETITION_PENALTY,
-                    prompt_length,
-                    tokenizer.encode(SYSTEM_PROMPT, add_special_tokens=False),
-                )
-            ]
-        )
+        processors.append(GeneratedRepetitionPenalty(REPETITION_PENALTY, prompt_length))
+    settings["logits_processor"] = LogitsProcessorList(processors)
     return settings
 
 
@@ -158,23 +137,27 @@ def encode_chat(tokenizer, messages, device):
     return {key: value.to(device) for key, value in encoded.items()}
 
 
+def set_steering_context_mode(model, messages):
+    model._doomer_steering_window = None if len(messages) <= 2 else 1
+
+
 def generate_once(
     model,
     tokenizer,
     messages,
     max_new_tokens=MAX_NEW_TOKENS,
-    sample=None,
     seed=SEED,
 ):
     import torch
 
-    if sample is None:
-        sample = len(messages) <= 2
     device = next(model.parameters()).device
     inputs = encode_chat(tokenizer, messages, device)
     settings = generation_settings(
-        tokenizer, max_new_tokens, sample, prompt_length=inputs["input_ids"].shape[1]
+        tokenizer,
+        max_new_tokens,
+        prompt_length=inputs["input_ids"].shape[1],
     )
+    set_steering_context_mode(model, messages)
     torch.manual_seed(seed)
     with torch.inference_mode():
         output = model.generate(**inputs, **settings)
@@ -193,6 +176,10 @@ def assign_steering(model, deltas):
 
     norms = {}
     layers = decoder_layers(model)
+    for handle in getattr(model, "_doomer_steering_handles", []):
+        handle.remove()
+    model._doomer_steering_handles = []
+    model._doomer_steering_window = 1
     for layer_index, delta in deltas.items():
         layer_index = int(layer_index)
         down_proj = layers[layer_index].mlp.down_proj
@@ -201,10 +188,25 @@ def assign_steering(model, deltas):
         value = delta.to(device=down_proj.weight.device, dtype=down_proj.weight.dtype)
         down_proj.bias = torch.nn.Parameter(value, requires_grad=False)
         norms[str(layer_index)] = float(value.float().norm().item())
+
+        def context_safe_steering(module, args, output):
+            window = getattr(model, "_doomer_steering_window", 1)
+            if args[0].shape[1] <= 1 or window is None:
+                return output
+            correction = module.bias.expand_as(output).clone()
+            correction[:, -window:, :] = 0
+            return output - correction
+
+        model._doomer_steering_handles.append(
+            down_proj.register_forward_hook(context_safe_steering)
+        )
     return norms
 
 
 def clear_steering(model):
+    for handle in getattr(model, "_doomer_steering_handles", []):
+        handle.remove()
+    model._doomer_steering_handles = []
     for layer in decoder_layers(model):
         if hasattr(layer.mlp.down_proj, "bias"):
             layer.mlp.down_proj.bias = None
@@ -227,6 +229,8 @@ class Chat:
         self.tokenizer, self.model = load_model()
         with open(STEERING_PATH, "rb") as artifact_file:
             self.artifact = torch.load(artifact_file, map_location="cpu", weights_only=True)
+        if self.artifact.get("format_version") != STEERING_FORMAT_VERSION:
+            raise RuntimeError("Stale steering weights; run `modal run steer.py` first")
         if self.artifact.get("model") != MODEL_ID:
             raise RuntimeError("Steering artifact targets a different model")
         self.bias_norms = assign_steering(self.model, self.artifact["deltas"])
@@ -257,9 +261,9 @@ class Chat:
         settings = generation_settings(
             self.tokenizer,
             max_new_tokens,
-            sample=len(prepared) <= 2,
             prompt_length=inputs["input_ids"].shape[1],
         )
+        set_steering_context_mode(self.model, prepared)
         errors = []
 
         def generate():
@@ -288,6 +292,7 @@ class Chat:
         return {
             "model": MODEL_ID,
             "persona": "rekt.eth",
+            "scale": self.artifact["scale"],
             "cuda": torch.cuda.is_available(),
             "steered_layers": sorted(int(layer) for layer in self.bias_norms),
             "bias_norms": self.bias_norms,
@@ -343,6 +348,15 @@ def main():
     second_streamed = "".join(chat.reply.remote_gen(context, MAX_NEW_TOKENS))
     assert second_streamed == second["text"]
     assert "eggplant" in second["text"].lower(), second
+    for text in (
+        verification["actual"],
+        streamed,
+        first["text"],
+        first_streamed,
+        second["text"],
+        second_streamed,
+    ):
+        assert "<think>" not in text and "</think>" not in text, text
     print(
         {
             "health": health,
