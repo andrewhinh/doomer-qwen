@@ -9,7 +9,7 @@ Prerequisites: [`uv`](https://docs.astral.sh/uv/), a Modal account, and a Modal 
 ```bash
 uv sync
 source .venv/bin/activate
-export MODAL_ENVIRONMENT=ajhinh-dev
+export MODAL_ENVIRONMENT=demos
 modal run steer.py
 modal deploy app.py
 ```
@@ -22,22 +22,13 @@ Only the Modal client is installed locally. PyTorch, Transformers 5+, Accelerate
 
 ## Deployment
 
-Deployed in the `ajhinh-dev` environment:
+Deployed in the `demos` environment:
 
 ```text
-https://modal-labs-ajhinh-dev--doomer-qwen-web.us-east.modal.run
+https://modal-labs-demos--doomer-qwen-web.us-east.modal.run
 ```
 
-This environment blocks unauthenticated URLs, so `app.py` sets `requires_proxy_auth=True`. Requests must include a Modal proxy token allowed into `ajhinh-dev`; without one, the proxy returns HTTP 401 before the request reaches the app.
-
-```bash
-modal workspace proxy-tokens create --name doomer-qwen --json
-modal workspace proxy-tokens allow wk-your-token-id ajhinh-dev
-export MODAL_PROXY_KEY=wk-your-token-id
-export MODAL_PROXY_SECRET=ws-your-token-secret
-```
-
-Supply `Modal-Key` and `Modal-Secret` on every request, including browser requests. To make the URL public instead, a workspace manager must allow unauthenticated URLs for this environment and `requires_proxy_auth=True` must be removed.
+The site is publicly accessible without proxy credentials. The ASGI app uses Modal's default unauthenticated web-function configuration, which the `demos` environment permits.
 
 ## Recipe
 
@@ -75,17 +66,13 @@ modal serve app.py
 
 - `steer.py` prints hooked-versus-bias token comparisons, steered and unsteered replies, persona trait checks, EOS status, a codeword follow-up check, and a successful artifact readback.
 - `serve.py` checks non-zero biases, matches the deployed class against the saved reference generation, and verifies streamed text against non-streamed generation.
-- `modal serve app.py` prints a temporary authenticated web URL. Open it with a client that supplies the proxy-token headers.
+- `modal serve app.py` prints a temporary public web URL for local development against remote Modal resources.
 
 Exercise the HTTP surface with the printed URL:
 
 ```bash
-curl "$APP_URL/health" \
-  -H "Modal-Key: $MODAL_PROXY_KEY" \
-  -H "Modal-Secret: $MODAL_PROXY_SECRET"
+curl "$APP_URL/health"
 curl -N "$APP_URL/chat" \
-  -H "Modal-Key: $MODAL_PROXY_KEY" \
-  -H "Modal-Secret: $MODAL_PROXY_SECRET" \
   -H 'Content-Type: application/json' \
   -d '{"messages":[{"role":"user","content":"gm"}]}'
 ```

@@ -16,7 +16,7 @@ web_image = (
 
 
 @app.function(image=web_image)
-@modal.asgi_app(requires_proxy_auth=True)
+@modal.asgi_app()
 def web():
     from fastapi import FastAPI, Request
     from fastapi.middleware.cors import CORSMiddleware
