@@ -1,0 +1,299 @@
+<!doctype html>
+<html lang="en">
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1">
+  <meta name="theme-color" content="#070907">
+  <meta name="description" content="modal-bro — a tech doomer made only with neuron steering">
+  <title>modal-bro</title>
+  <link rel="icon" type="image/png" sizes="512x512" href="favicon.png?v=2">
+  <link rel="preconnect" href="https://fonts.googleapis.com">
+  <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+  <link href="https://fonts.googleapis.com/css2?family=JetBrains+Mono:wght@400;600&display=swap" rel="stylesheet">
+  <style>
+    :root {
+      color-scheme: dark;
+      --bg: #070907;
+      --text: #d7ddd4;
+      --muted: #737c70;
+      --green: #b6ff3b;
+      --red: #ff4967;
+      --line: #242b22;
+    }
+
+    * { box-sizing: border-box; }
+
+    body {
+      margin: 0;
+      background: var(--bg);
+      color: var(--text);
+      font: 14px/1.65 "JetBrains Mono", ui-monospace, SFMono-Regular, Consolas, monospace;
+    }
+
+    button, textarea { font: inherit; }
+
+    .terminal {
+      width: min(820px, 100%);
+      height: 100dvh;
+      margin: 0 auto;
+      padding: 24px;
+      display: flex;
+      flex-direction: column;
+    }
+
+    .top-bar {
+      display: flex;
+      align-items: center;
+      justify-content: space-between;
+      gap: 20px;
+      padding-bottom: 16px;
+      border-bottom: 1px solid var(--line);
+    }
+
+    .logo {
+      display: block;
+      flex: none;
+      width: 96px;
+      height: auto;
+    }
+
+    .model-credit {
+      color: var(--muted);
+      font-size: 11px;
+      white-space: nowrap;
+    }
+
+    .model-credit a { color: inherit; text-underline-offset: 3px; }
+    .model-credit a:hover { color: var(--green); }
+
+    .chat-log {
+      flex: 1;
+      min-height: 0;
+      overflow-y: auto;
+      padding: 24px 0;
+      scrollbar-color: var(--line) transparent;
+    }
+
+    .message {
+      display: grid;
+      grid-template-columns: 82px minmax(0, 1fr);
+      gap: 16px;
+      margin-bottom: 22px;
+    }
+
+    .role {
+      color: var(--muted);
+      font-size: 11px;
+      font-weight: 600;
+      padding-top: 2px;
+    }
+
+    .assistant .role { color: var(--green); }
+    .user .role { color: var(--red); }
+
+    .body {
+      margin: 0;
+      white-space: pre-wrap;
+      overflow-wrap: anywhere;
+    }
+
+    .system .body { color: var(--muted); }
+
+    .streaming .body::after {
+      content: "▋";
+      color: var(--green);
+      animation: blink 800ms steps(1) infinite;
+    }
+
+    @keyframes blink { 50% { opacity: 0; } }
+
+    .composer {
+      display: flex;
+      align-items: flex-end;
+      gap: 12px;
+      padding-top: 16px;
+      border-top: 1px solid var(--line);
+    }
+
+    .prompt { color: var(--green); padding: 8px 0; }
+
+    textarea {
+      flex: 1;
+      min-width: 0;
+      max-height: 120px;
+      padding: 8px 0;
+      border: 0;
+      outline: 0;
+      resize: none;
+      background: transparent;
+      color: var(--text);
+      line-height: 1.5;
+    }
+
+    textarea::placeholder { color: var(--muted); }
+
+    button {
+      border: 1px solid var(--line);
+      background: transparent;
+      color: var(--green);
+      padding: 7px 12px;
+      cursor: pointer;
+    }
+
+    button:hover { border-color: var(--green); }
+    button.stop { color: var(--red); }
+
+    @media (max-width: 560px) {
+      .terminal { padding: 16px; }
+      .top-bar { gap: 12px; }
+      .logo { width: 78px; }
+      .model-credit { font-size: 10px; }
+      .message { grid-template-columns: 64px minmax(0, 1fr); gap: 10px; }
+    }
+
+    @media (prefers-reduced-motion: reduce) {
+      .streaming .body::after { animation: none; }
+    }
+  </style>
+</head>
+<body>
+  <main class="terminal">
+    <header class="top-bar">
+      <img class="logo" src="logo.png" alt="Modal" width="3246" height="555">
+      <span class="model-credit">Qwen3.5-4B | <a href="https://neuronary.org" target="_blank" rel="noopener noreferrer">neuronary</a></span>
+    </header>
+
+    <section class="chat-log" id="chat-log" role="log" aria-live="polite" aria-relevant="additions text"></section>
+
+    <form class="composer" id="composer">
+      <span class="prompt" aria-hidden="true">&gt;_</span>
+      <textarea id="message-input" rows="1" maxlength="2000" placeholder="speak to bro" aria-label="Message Bro" required></textarea>
+      <button id="send-button" type="submit">send ↵</button>
+    </form>
+
+  </main>
+
+  <script>
+    const chatLog = document.getElementById("chat-log");
+    const composer = document.getElementById("composer");
+    const input = document.getElementById("message-input");
+    const sendButton = document.getElementById("send-button");
+    const history = [];
+    const apiBase = (new URLSearchParams(location.search).get("api") || "").replace(/\/$/, "");
+    let activeController = null;
+    let streamingMessage = null;
+
+    function addMessage(role, content, streaming = false) {
+      const wrapper = document.createElement("article");
+      wrapper.className = `message ${role}${streaming ? " streaming" : ""}`;
+      const label = document.createElement("span");
+      label.className = "role";
+      label.textContent = role === "assistant" ? "Bro" : role === "user" ? "You" : role;
+      const body = document.createElement("p");
+      body.className = "body";
+      body.textContent = content;
+      wrapper.append(label, body);
+      chatLog.appendChild(wrapper);
+      chatLog.scrollTop = chatLog.scrollHeight;
+      return { wrapper, body };
+    }
+
+    function setStreaming(active) {
+      input.disabled = active;
+      sendButton.classList.toggle("stop", active);
+      sendButton.textContent = active ? "stop ■" : "send ↵";
+      if (!active) {
+        if (streamingMessage) streamingMessage.wrapper.classList.remove("streaming");
+        activeController = null;
+        streamingMessage = null;
+        input.focus();
+      }
+    }
+
+    async function sendMessage(text) {
+      const content = text.trim();
+      if (activeController || !content) return;
+      if (location.protocol === "file:" && !apiBase) {
+        addMessage("system", "open with ?api=<modal-url> to connect");
+        return;
+      }
+
+      addMessage("user", content);
+      history.push({ role: "user", content });
+      input.value = "";
+      input.style.height = "auto";
+      activeController = new AbortController();
+      streamingMessage = addMessage("assistant", "", true);
+      setStreaming(true);
+      let reply = "";
+
+      try {
+        const response = await fetch(`${apiBase}/chat`, {
+          method: "POST",
+          headers: { "Content-Type": "application/json" },
+          body: JSON.stringify({ messages: history }),
+          signal: activeController.signal,
+        });
+        if (!response.ok) throw new Error(`HTTP ${response.status}`);
+        if (!response.body) throw new Error("streaming unavailable");
+
+        const reader = response.body.getReader();
+        const decoder = new TextDecoder();
+        let buffer = "";
+        while (true) {
+          const { done, value } = await reader.read();
+          buffer += decoder.decode(value || new Uint8Array(), { stream: !done });
+          const events = buffer.split("\n\n");
+          buffer = events.pop() || "";
+          for (const event of events) {
+            const data = event.split("\n")
+              .filter(line => line.startsWith("data:"))
+              .map(line => line.slice(5).trimStart())
+              .join("\n");
+            if (!data || data === "[DONE]") continue;
+            const payload = JSON.parse(data);
+            if (payload.error) throw new Error(payload.error);
+            reply += payload.text || "";
+            streamingMessage.body.textContent = reply;
+            chatLog.scrollTop = chatLog.scrollHeight;
+          }
+          if (done) break;
+        }
+        if (!reply) throw new Error("empty response");
+        history.push({ role: "assistant", content: reply });
+      } catch (error) {
+        streamingMessage.wrapper.remove();
+        if (error.name === "AbortError") {
+          if (reply) history.push({ role: "assistant", content: reply });
+          addMessage("system", reply ? `${reply}\n\n[stopped]` : "[stopped]");
+        } else {
+          history.pop();
+          addMessage("system", `connection failed: ${error.message}. your message was removed; retry.`);
+        }
+      } finally {
+        setStreaming(false);
+      }
+    }
+
+    composer.addEventListener("submit", event => {
+      event.preventDefault();
+      if (activeController) activeController.abort();
+      else sendMessage(input.value);
+    });
+
+    input.addEventListener("keydown", event => {
+      if (event.key === "Enter" && !event.shiftKey) {
+        event.preventDefault();
+        composer.requestSubmit();
+      }
+    });
+
+    input.addEventListener("input", () => {
+      input.style.height = "auto";
+      input.style.height = `${Math.min(input.scrollHeight, 120)}px`;
+    });
+
+    input.focus();
+  </script>
+</body>
+</html>
