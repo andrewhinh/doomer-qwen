@@ -1,0 +1,783 @@
+<!doctype html>
+<html lang="en">
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1">
+  <meta name="theme-color" content="#050806">
+  <meta name="description" content="rekt.eth — a neuronary-steered crypto doomer terminal">
+  <title>rekt.eth // doom terminal</title>
+  <link rel="preconnect" href="https://fonts.googleapis.com">
+  <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+  <link href="https://fonts.googleapis.com/css2?family=JetBrains+Mono:ital,wght@0,400;0,500;0,600;0,700;1,400&display=swap" rel="stylesheet">
+  <style>
+    :root {
+      color-scheme: dark;
+      --bg: #050806;
+      --panel: rgba(7, 14, 10, 0.9);
+      --green: #b6ff3b;
+      --green-dim: #6f9d35;
+      --red: #ff4967;
+      --text: #d7e7d5;
+      --muted: #718072;
+      --line: rgba(182, 255, 59, 0.17);
+    }
+
+    * { box-sizing: border-box; }
+
+    html, body { margin: 0; min-height: 100%; }
+
+    body {
+      background: var(--bg);
+      color: var(--text);
+      font-family: "JetBrains Mono", ui-monospace, SFMono-Regular, Consolas, monospace;
+      font-size: 14px;
+      overflow-x: hidden;
+    }
+
+    button, textarea { font: inherit; }
+
+    button { cursor: pointer; }
+
+    #chart {
+      position: fixed;
+      inset: 0;
+      width: 100%;
+      height: 100%;
+      opacity: 0.32;
+      pointer-events: none;
+    }
+
+    .ambient {
+      position: fixed;
+      inset: 0;
+      pointer-events: none;
+      background:
+        radial-gradient(circle at 75% 15%, rgba(182, 255, 59, 0.055), transparent 34%),
+        radial-gradient(circle at 10% 85%, rgba(255, 73, 103, 0.075), transparent 40%),
+        linear-gradient(rgba(5, 8, 6, 0.18), rgba(5, 8, 6, 0.85));
+    }
+
+    .crt {
+      position: fixed;
+      inset: 0;
+      z-index: 50;
+      pointer-events: none;
+      background: repeating-linear-gradient(
+        to bottom,
+        transparent 0,
+        transparent 2px,
+        rgba(0, 0, 0, 0.17) 3px,
+        rgba(0, 0, 0, 0.17) 4px
+      );
+      animation: flicker 7s infinite steps(1);
+    }
+
+    .crt::after {
+      content: "";
+      position: absolute;
+      inset: 0;
+      box-shadow: inset 0 0 150px rgba(0, 0, 0, 0.8);
+    }
+
+    .boot {
+      position: fixed;
+      inset: 0;
+      z-index: 100;
+      display: grid;
+      place-items: center;
+      padding: 24px;
+      background: #030503;
+      transition: opacity 400ms ease, visibility 400ms ease;
+    }
+
+    .boot.done { opacity: 0; visibility: hidden; }
+
+    .boot-inner { width: min(620px, 100%); }
+
+    .boot-mark {
+      margin: 0 0 30px;
+      color: var(--green);
+      font-size: clamp(26px, 7vw, 52px);
+      font-weight: 700;
+      letter-spacing: -0.07em;
+      text-shadow: 0 0 24px rgba(182, 255, 59, 0.35);
+    }
+
+    .boot-mark span { color: var(--red); }
+
+    #boot-log {
+      min-height: 150px;
+      color: var(--green-dim);
+      font-size: 12px;
+      line-height: 2;
+    }
+
+    .boot-line { display: block; }
+
+    .boot-line::before { content: "[ OK ] "; color: var(--green); }
+
+    .boot-line.fail::before { content: "[REKT] "; color: var(--red); }
+
+    .boot-skip {
+      margin-top: 24px;
+      padding: 0;
+      border: 0;
+      background: none;
+      color: var(--muted);
+      font-size: 11px;
+      text-transform: uppercase;
+      letter-spacing: 0.12em;
+    }
+
+    .boot-skip:hover { color: var(--green); }
+
+    .page {
+      position: relative;
+      z-index: 2;
+      width: min(1060px, calc(100% - 40px));
+      margin: 0 auto;
+      padding: 30px 0 34px;
+    }
+
+    .header {
+      display: flex;
+      align-items: flex-end;
+      justify-content: space-between;
+      gap: 20px;
+      padding: 0 2px 22px;
+    }
+
+    .brand {
+      margin: 0;
+      color: var(--green);
+      font-size: clamp(28px, 5vw, 46px);
+      line-height: 0.95;
+      letter-spacing: -0.075em;
+      text-shadow: 0 0 22px rgba(182, 255, 59, 0.2);
+    }
+
+    .brand:hover { animation: glitch 220ms steps(2) 2; }
+
+    .brand small {
+      display: block;
+      margin-top: 12px;
+      color: var(--muted);
+      font-size: 10px;
+      font-weight: 500;
+      letter-spacing: 0.2em;
+      text-transform: uppercase;
+      text-shadow: none;
+    }
+
+    .header-meta {
+      color: var(--muted);
+      font-size: 10px;
+      line-height: 1.9;
+      text-align: right;
+      text-transform: uppercase;
+      letter-spacing: 0.1em;
+    }
+
+    .online { color: var(--green); }
+
+    .online::before {
+      content: "";
+      display: inline-block;
+      width: 6px;
+      height: 6px;
+      margin-right: 7px;
+      border-radius: 50%;
+      background: currentColor;
+      box-shadow: 0 0 10px currentColor;
+      animation: pulse 1.8s infinite;
+    }
+
+    .ticker-wrap {
+      overflow: hidden;
+      border-top: 1px solid var(--line);
+      border-bottom: 1px solid var(--line);
+      background: rgba(5, 8, 6, 0.74);
+    }
+
+    .ticker {
+      display: flex;
+      width: max-content;
+      animation: marquee 27s linear infinite;
+    }
+
+    .ticker:hover { animation-play-state: paused; }
+
+    .ticker-group { display: flex; flex-shrink: 0; }
+
+    .tick {
+      display: flex;
+      gap: 12px;
+      padding: 10px 24px;
+      border-right: 1px solid var(--line);
+      color: #a5b3a4;
+      font-size: 11px;
+      white-space: nowrap;
+    }
+
+    .tick strong { color: var(--red); font-weight: 500; }
+
+    .terminal {
+      margin-top: 22px;
+      overflow: hidden;
+      border: 1px solid rgba(182, 255, 59, 0.24);
+      border-radius: 3px;
+      background: var(--panel);
+      box-shadow: 0 24px 80px rgba(0, 0, 0, 0.48), 0 0 40px rgba(182, 255, 59, 0.025);
+      backdrop-filter: blur(8px);
+    }
+
+    .terminal-bar {
+      display: flex;
+      align-items: center;
+      justify-content: space-between;
+      min-height: 40px;
+      padding: 0 14px;
+      border-bottom: 1px solid var(--line);
+      color: var(--muted);
+      font-size: 10px;
+      letter-spacing: 0.07em;
+      text-transform: uppercase;
+    }
+
+    .terminal-title { display: flex; align-items: center; gap: 12px; }
+
+    .lights { display: flex; gap: 6px; }
+
+    .light { width: 7px; height: 7px; border-radius: 50%; background: #263026; }
+
+    .light:first-child { background: var(--red); }
+    .light:nth-child(2) { background: #c7a23b; }
+    .light:last-child { background: var(--green-dim); }
+
+    #link-status { color: var(--green-dim); }
+
+    .chat-log {
+      height: min(54vh, 510px);
+      min-height: 340px;
+      overflow-y: auto;
+      padding: 24px;
+      scrollbar-width: thin;
+      scrollbar-color: var(--green-dim) transparent;
+    }
+
+    .message {
+      display: grid;
+      grid-template-columns: 92px minmax(0, 1fr);
+      gap: 16px;
+      margin-bottom: 24px;
+      animation: message-in 180ms ease-out;
+    }
+
+    .message-meta {
+      padding-top: 3px;
+      color: var(--muted);
+      font-size: 10px;
+      line-height: 1.6;
+      text-transform: uppercase;
+      word-break: break-word;
+    }
+
+    .message.assistant .message-meta { color: var(--green); }
+    .message.user .message-meta { color: #92a4b5; }
+    .message.system .message-meta { color: var(--red); }
+
+    .message-body {
+      margin: 0;
+      color: #c8d7c6;
+      font-size: 13px;
+      line-height: 1.8;
+      white-space: pre-wrap;
+      overflow-wrap: anywhere;
+    }
+
+    .message.assistant .message-body { color: #e0eddb; }
+    .message.system .message-body { color: #ad867f; font-size: 12px; }
+
+    .streaming .message-body::after {
+      content: "█";
+      margin-left: 4px;
+      color: var(--green);
+      animation: blink 720ms steps(1) infinite;
+    }
+
+    .empty-state { color: var(--muted); line-height: 1.9; }
+
+    .empty-state strong { color: var(--green); font-weight: 500; }
+
+    .suggestions {
+      display: flex;
+      flex-wrap: wrap;
+      gap: 8px;
+      margin-top: 14px;
+    }
+
+    .suggestion {
+      padding: 7px 10px;
+      border: 1px solid var(--line);
+      border-radius: 2px;
+      background: transparent;
+      color: var(--green-dim);
+      font-size: 10px;
+      transition: border-color 150ms, color 150ms, background 150ms;
+    }
+
+    .suggestion:hover {
+      border-color: var(--green);
+      background: rgba(182, 255, 59, 0.05);
+      color: var(--green);
+      animation: glitch 200ms steps(2) 1;
+    }
+
+    .composer {
+      display: grid;
+      grid-template-columns: auto minmax(0, 1fr) auto;
+      align-items: end;
+      gap: 12px;
+      padding: 16px 18px;
+      border-top: 1px solid var(--line);
+      background: rgba(3, 7, 4, 0.72);
+    }
+
+    .prompt { padding: 10px 0; color: var(--green); font-weight: 700; }
+
+    #message-input {
+      width: 100%;
+      max-height: 120px;
+      resize: none;
+      padding: 9px 4px;
+      border: 0;
+      outline: 0;
+      background: transparent;
+      color: var(--text);
+      line-height: 1.5;
+    }
+
+    #message-input::placeholder { color: #4f5d50; }
+
+    #send-button {
+      min-width: 112px;
+      padding: 10px 14px;
+      border: 1px solid var(--green-dim);
+      border-radius: 2px;
+      background: rgba(182, 255, 59, 0.055);
+      color: var(--green);
+      font-size: 10px;
+      font-weight: 600;
+      letter-spacing: 0.08em;
+      text-transform: uppercase;
+      transition: background 150ms, box-shadow 150ms;
+    }
+
+    #send-button:hover:not(:disabled) {
+      background: rgba(182, 255, 59, 0.12);
+      box-shadow: 0 0 18px rgba(182, 255, 59, 0.1);
+    }
+
+    #send-button:disabled { cursor: not-allowed; opacity: 0.45; }
+
+    #send-button.stop { border-color: var(--red); color: var(--red); }
+
+    .footer {
+      display: flex;
+      justify-content: space-between;
+      gap: 16px;
+      padding: 13px 2px 0;
+      color: #536153;
+      font-size: 9px;
+      line-height: 1.7;
+      letter-spacing: 0.08em;
+      text-transform: uppercase;
+    }
+
+    .footer span:last-child { text-align: right; }
+
+    @keyframes marquee { to { transform: translateX(-50%); } }
+    @keyframes blink { 50% { opacity: 0; } }
+    @keyframes pulse { 50% { opacity: 0.35; } }
+    @keyframes message-in { from { opacity: 0; transform: translateY(4px); } }
+    @keyframes flicker {
+      0%, 93%, 95%, 100% { opacity: 0.8; }
+      94% { opacity: 0.58; }
+    }
+    @keyframes glitch {
+      0% { transform: translate(0); text-shadow: 2px 0 var(--red), -2px 0 #36c5f0; }
+      33% { transform: translate(-2px, 1px); }
+      66% { transform: translate(2px, -1px); text-shadow: -2px 0 var(--red), 2px 0 #36c5f0; }
+      100% { transform: translate(0); text-shadow: none; }
+    }
+
+    @media (max-width: 680px) {
+      .page { width: min(100% - 22px, 1060px); padding-top: 20px; }
+      .header { align-items: flex-start; }
+      .header-meta { font-size: 8px; }
+      .header-meta span { display: block; }
+      .chat-log { min-height: 330px; height: 55vh; padding: 17px 14px; }
+      .message { grid-template-columns: 1fr; gap: 5px; margin-bottom: 20px; }
+      .message-meta { font-size: 9px; }
+      .composer { gap: 7px; padding: 12px; }
+      #send-button { min-width: 48px; width: 48px; padding: 10px 5px; font-size: 0; }
+      #send-button::after { content: "↵"; font-size: 18px; }
+      #send-button.stop::after { content: "■"; font-size: 12px; }
+      .footer { font-size: 8px; }
+    }
+
+    @media (prefers-reduced-motion: reduce) {
+      *, *::before, *::after { animation-duration: 1ms !important; animation-iteration-count: 1 !important; }
+      .ticker { animation: none; }
+      .boot { transition: none; }
+    }
+  </style>
+</head>
+<body>
+  <canvas id="chart" aria-hidden="true"></canvas>
+  <div class="ambient" aria-hidden="true"></div>
+  <div class="crt" aria-hidden="true"></div>
+
+  <section class="boot" id="boot" aria-label="Terminal boot sequence">
+    <div class="boot-inner">
+      <h1 class="boot-mark">DOOM<span>_</span>PROTOCOL</h1>
+      <div id="boot-log" aria-live="polite"></div>
+      <button class="boot-skip" id="boot-skip" type="button">[ press any key to skip ]</button>
+    </div>
+  </section>
+
+  <main class="page">
+    <header class="header">
+      <h1 class="brand">rekt.eth<small>crypto doomer // serial founder of failing founders</small></h1>
+      <div class="header-meta">
+        <div class="online" id="warm-status">warming neuron</div>
+        <span>Qwen3.5-4B / bf16</span>
+        <span>neuronary build 0xdead</span>
+      </div>
+    </header>
+
+    <div class="ticker-wrap" aria-label="Doom market ticker">
+      <div class="ticker" id="ticker"></div>
+    </div>
+
+    <section class="terminal" aria-label="Chat with rekt.eth">
+      <div class="terminal-bar">
+        <div class="terminal-title">
+          <div class="lights" aria-hidden="true"><i class="light"></i><i class="light"></i><i class="light"></i></div>
+          <span>ssh rekt.eth@doomnet — utf-8</span>
+        </div>
+        <span id="link-status">handshaking…</span>
+      </div>
+
+      <div class="chat-log" id="chat-log" role="log" aria-live="polite" aria-relevant="additions text">
+        <div class="empty-state" id="empty-state">
+          <strong>CONNECTION ESTABLISHED.</strong><br>
+          The market is fake. The pain is real. Your bags are your own fault.<br>
+          Ask rekt.eth anything. Expect financial nihilism.
+          <div class="suggestions">
+            <button class="suggestion" type="button">who are you?</button>
+            <button class="suggestion" type="button">gm, is btc back?</button>
+            <button class="suggestion" type="button">pitch me a web3 startup</button>
+          </div>
+        </div>
+      </div>
+
+      <form class="composer" id="composer">
+        <span class="prompt" aria-hidden="true">&gt;_</span>
+        <textarea id="message-input" rows="1" maxlength="2000" placeholder="type your last coherent thought…" aria-label="Message rekt.eth" required></textarea>
+        <button id="send-button" type="submit">transmit ↵</button>
+      </form>
+    </section>
+
+    <footer class="footer">
+      <span>not financial advice // not emotional advice either</span>
+      <span>7 neurons modified // 0 bags insured</span>
+    </footer>
+  </main>
+
+  <script>
+    const chatLog = document.getElementById("chat-log");
+    const emptyState = document.getElementById("empty-state");
+    const composer = document.getElementById("composer");
+    const input = document.getElementById("message-input");
+    const sendButton = document.getElementById("send-button");
+    const linkStatus = document.getElementById("link-status");
+    const warmStatus = document.getElementById("warm-status");
+    const history = [];
+    const apiParam = new URLSearchParams(window.location.search).get("api");
+    const apiBase = (apiParam || "").replace(/\/$/, "");
+    let activeController = null;
+    let streamingMessage = null;
+
+    function timestamp() {
+      return new Date().toLocaleTimeString([], { hour: "2-digit", minute: "2-digit", hour12: false });
+    }
+
+    function addMessage(role, content, streaming = false) {
+      emptyState.style.display = "none";
+      const wrapper = document.createElement("article");
+      wrapper.className = `message ${role}${streaming ? " streaming" : ""}`;
+      const meta = document.createElement("div");
+      meta.className = "message-meta";
+      const name = role === "assistant" ? "rekt.eth" : role === "user" ? "you" : "system";
+      meta.textContent = `${name}\n${timestamp()}`;
+      const body = document.createElement("p");
+      body.className = "message-body";
+      body.textContent = content;
+      wrapper.append(meta, body);
+      chatLog.appendChild(wrapper);
+      chatLog.scrollTop = chatLog.scrollHeight;
+      return { wrapper, body };
+    }
+
+    function setStreaming(active) {
+      sendButton.classList.toggle("stop", active);
+      sendButton.textContent = active ? "abort ■" : "transmit ↵";
+      input.disabled = active;
+      if (!active) {
+        activeController = null;
+        streamingMessage = null;
+        input.focus();
+      }
+    }
+
+    async function sendMessage(text) {
+      if (activeController || !text.trim()) return;
+      if (window.location.protocol === "file:" && !apiBase) {
+        addMessage("system", "Add ?api=<modal-url> when opening this file locally. Example: index.html?api=https://your-app.modal.run");
+        return;
+      }
+      const content = text.trim();
+      addMessage("user", content);
+      history.push({ role: "user", content });
+      input.value = "";
+      input.style.height = "auto";
+      activeController = new AbortController();
+      streamingMessage = addMessage("assistant", "", true);
+      setStreaming(true);
+      linkStatus.textContent = "streaming doom…";
+      let reply = "";
+      try {
+        const response = await fetch(`${apiBase}/chat`, {
+          method: "POST",
+          headers: { "Content-Type": "application/json" },
+          body: JSON.stringify({ messages: history }),
+          signal: activeController.signal,
+        });
+        if (!response.ok) throw new Error(`HTTP ${response.status}`);
+        if (!response.body) throw new Error("Streaming is unavailable in this browser");
+        const reader = response.body.getReader();
+        const decoder = new TextDecoder();
+        let buffer = "";
+        let finished = false;
+        while (!finished) {
+          const { done, value } = await reader.read();
+          buffer += decoder.decode(value || new Uint8Array(), { stream: !done });
+          const events = buffer.split("\n\n");
+          buffer = events.pop() || "";
+          for (const event of events) {
+            const data = event.split("\n").filter(line => line.startsWith("data:")).map(line => line.slice(5).trimStart()).join("\n");
+            if (!data) continue;
+            if (data === "[DONE]") { finished = true; break; }
+            const payload = JSON.parse(data);
+            if (payload.error) throw new Error(payload.error);
+            reply += payload.text || "";
+            streamingMessage.body.textContent = reply;
+            chatLog.scrollTop = chatLog.scrollHeight;
+          }
+          if (done) break;
+        }
+        if (!reply) throw new Error("The void returned an empty response");
+        history.push({ role: "assistant", content: reply });
+        linkStatus.textContent = "link ready";
+      } catch (error) {
+        streamingMessage.wrapper.remove();
+        if (error.name === "AbortError") {
+          if (reply) history.push({ role: "assistant", content: reply });
+          addMessage("system", reply ? `${reply}\n\n[generation aborted]` : "[generation aborted]");
+        } else {
+          history.pop();
+          addMessage("system", `CONNECTION REKT: ${error.message}. Your message was removed from history; retry when ready.`);
+        }
+        linkStatus.textContent = "link degraded";
+      } finally {
+        setStreaming(false);
+      }
+    }
+
+    composer.addEventListener("submit", event => {
+      event.preventDefault();
+      if (activeController) {
+        activeController.abort();
+      } else {
+        sendMessage(input.value);
+      }
+    });
+
+    input.addEventListener("keydown", event => {
+      if (event.key === "Enter" && !event.shiftKey) {
+        event.preventDefault();
+        composer.requestSubmit();
+      }
+    });
+
+    input.addEventListener("input", () => {
+      input.style.height = "auto";
+      input.style.height = `${Math.min(input.scrollHeight, 120)}px`;
+    });
+
+    document.querySelectorAll(".suggestion").forEach(button => {
+      button.addEventListener("click", () => sendMessage(button.textContent));
+    });
+
+    async function checkHealth() {
+      if (window.location.protocol === "file:" && !apiBase) {
+        linkStatus.textContent = "local preview";
+        warmStatus.textContent = "api required";
+        return;
+      }
+      try {
+        const response = await fetch(`${apiBase}/health`);
+        if (!response.ok) throw new Error();
+        const health = await response.json();
+        linkStatus.textContent = "link ready";
+        warmStatus.textContent = `${health.steered_layers.length} neurons hot`;
+      } catch {
+        linkStatus.textContent = "model waking up";
+        warmStatus.textContent = "cold start";
+      }
+    }
+
+    const tickerItems = [
+      ["$DOOM", "-42.00%"], ["$NGMI", "-99.99%"], ["$REKT", "-67.13%"],
+      ["$COPE", "-13.37%"], ["$HYPE", "-84.20%"], ["$HOPIUM", "-51.04%"],
+      ["$MOON", "-77.77%"], ["$GM", "-08.15%"],
+    ];
+    const ticker = document.getElementById("ticker");
+    for (let copy = 0; copy < 2; copy++) {
+      const group = document.createElement("div");
+      group.className = "ticker-group";
+      tickerItems.forEach(([symbol, change]) => {
+        const item = document.createElement("div");
+        item.className = "tick";
+        const name = document.createElement("span");
+        name.textContent = symbol;
+        const value = document.createElement("strong");
+        value.textContent = `${change} ▼`;
+        item.append(name, value);
+        group.appendChild(item);
+      });
+      ticker.appendChild(group);
+    }
+
+    const canvas = document.getElementById("chart");
+    const context = canvas.getContext("2d");
+    let width = 0;
+    let height = 0;
+    let candles = [];
+    let price = 100;
+    const candleWidth = 12;
+    const candleGap = 7;
+
+    function newCandle() {
+      if (price <= 10) price = 100 + Math.random() * 20;
+      const open = price;
+      const close = Math.max(4, open - (1.2 + Math.random() * 5.5));
+      const high = open + Math.random() * 1.5;
+      const low = close - Math.random() * 3;
+      price = close;
+      return { open, close, high, low };
+    }
+
+    function resizeChart() {
+      const ratio = Math.min(window.devicePixelRatio || 1, 2);
+      width = window.innerWidth;
+      height = window.innerHeight;
+      canvas.width = Math.floor(width * ratio);
+      canvas.height = Math.floor(height * ratio);
+      context.setTransform(ratio, 0, 0, ratio, 0, 0);
+      const count = Math.ceil(width / (candleWidth + candleGap)) + 3;
+      if (candles.length < count) {
+        while (candles.length < count) candles.push(newCandle());
+      } else {
+        candles = candles.slice(-count);
+      }
+    }
+
+    function drawChart() {
+      context.clearRect(0, 0, width, height);
+      context.strokeStyle = "rgba(182, 255, 59, 0.055)";
+      context.lineWidth = 1;
+      for (let y = 40; y < height; y += 80) {
+        context.beginPath();
+        context.moveTo(0, y + 0.5);
+        context.lineTo(width, y + 0.5);
+        context.stroke();
+      }
+      const maxPrice = Math.max(...candles.map(candle => candle.high), 105);
+      const minPrice = Math.min(...candles.map(candle => candle.low), 0);
+      const scale = value => height * 0.88 - ((value - minPrice) / Math.max(maxPrice - minPrice, 1)) * height * 0.72;
+      candles.forEach((candle, index) => {
+        const x = index * (candleWidth + candleGap);
+        const openY = scale(candle.open);
+        const closeY = scale(candle.close);
+        context.strokeStyle = "rgba(255, 73, 103, 0.75)";
+        context.fillStyle = "rgba(255, 73, 103, 0.42)";
+        context.beginPath();
+        context.moveTo(x + candleWidth / 2, scale(candle.high));
+        context.lineTo(x + candleWidth / 2, scale(candle.low));
+        context.stroke();
+        context.fillRect(x, Math.min(openY, closeY), candleWidth, Math.max(2, Math.abs(closeY - openY)));
+        context.strokeRect(x + 0.5, Math.min(openY, closeY) + 0.5, candleWidth - 1, Math.max(2, Math.abs(closeY - openY)));
+      });
+    }
+
+    window.addEventListener("resize", () => { resizeChart(); drawChart(); });
+    resizeChart();
+    drawChart();
+    if (!window.matchMedia("(prefers-reduced-motion: reduce)").matches) {
+      window.setInterval(() => {
+        candles.shift();
+        candles.push(newCandle());
+        drawChart();
+      }, 220);
+    }
+
+    const boot = document.getElementById("boot");
+    const bootLog = document.getElementById("boot-log");
+    const bootLines = [
+      "initializing doom protocol…",
+      "mounting neuronary deltas [7/7]…",
+      "liquidating hopium reserves…",
+      "connecting rekt.eth@doomnet…",
+      "market status: NGMI",
+    ];
+    let bootIndex = 0;
+    let bootClosed = false;
+
+    function closeBoot() {
+      bootClosed = true;
+      boot.classList.add("done");
+      input.focus();
+    }
+
+    function nextBootLine() {
+      if (bootClosed) return;
+      if (bootIndex >= bootLines.length) {
+        window.setTimeout(closeBoot, 350);
+        return;
+      }
+      const line = document.createElement("span");
+      line.className = `boot-line${bootIndex === bootLines.length - 1 ? " fail" : ""}`;
+      line.textContent = bootLines[bootIndex++];
+      bootLog.appendChild(line);
+      window.setTimeout(nextBootLine, 280);
+    }
+
+    document.getElementById("boot-skip").addEventListener("click", closeBoot);
+    window.addEventListener("keydown", closeBoot, { once: true });
+    window.setTimeout(nextBootLine, 220);
+    checkHealth();
+  </script>
+</body>
+</html>
