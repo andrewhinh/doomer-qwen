@@ -1,6 +1,6 @@
 # doomer-tech-bro
 
-https://github.com/user-attachments/assets/85feaba0-af46-48be-8797-d184fe883945
+https://github.com/user-attachments/assets/73161edb-14cf-4f21-8fcb-eca5356cc737
 
 qwen but like, doomer tech bro.
 
